@@ -1,63 +1,56 @@
 import requests
-import json
+import pandas as pd
 
-# 高德地图 API 的 Key
-API_KEY = '5b3ee23a39c21e3aee99ef5f55eaef6f'  # 替换为你的高德地图 API Key
+API_KEY = "5b3ee23a39c21e3aee99ef5f55eaef6f"  # 替换为你的高德 Key
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-def get_districts(province_name):
-    """
-    获取指定省份的行政区划信息
-    """
-    url = f"https://restapi.amap.com/v3/config/district?keywords={province_name}&subdistrict=2&showbiz=false&extensions=all&key={API_KEY}"
-    response = requests.get(url)
+def get_district_data(city_name):
+    """从高德API获取 city -> district -> street 的3级行政区划"""
+    url = "https://restapi.amap.com/v3/config/district"
+    params = {
+        "keywords": city_name,
+        "subdistrict": 3,
+        "key": API_KEY,
+        "extensions": "base"
+    }
+    response = requests.get(url, params=params, headers=HEADERS)
     if response.status_code == 200:
         return response.json()
-    else:
-        print(f"HTTP Error: {response.status_code}")
-        return None
+    return None
 
-def extract_and_save_cities(response_data):
-    """
-    提取城市信息并保存到文件
-    """
-    cities = []
-    for province in response_data.get("districts", []):
-        for city in province.get("districts", []):
-            cities.append({
-                "adcode": city["adcode"],
-                "name": city["name"],
-                "center": city["center"]
-            })
-
-    # 保存到文件
-    with open("cities.txt", "w", encoding="utf-8") as f:
-        for city in cities:
-            f.write(f"{city['name']}, {city['adcode']}, {city['center']}\n")
-
-def extract_and_save_districts(response_data):
-    """
-    提取区县信息并保存到文件
-    """
-    districts = []
-    for province in response_data.get("districts", []):
-        for city in province.get("districts", []):
+def parse_city_structure(data, city_name):
+    """解析 city -> district -> street，返回简化结构"""
+    results = []
+    try:
+        for city in data.get("districts", []):
             for district in city.get("districts", []):
-                districts.append({
-                    "adcode": district["adcode"],
-                    "name": district["name"],
-                    "center": district["center"],
-                    "city": city["name"]
-                })
+                print(f" 正在查询 {district['name']} 的街道信息...")
+                for street in district.get("districts", []):
+                    results.append({
+                        "city": city_name,
+                        "district": district["name"],
+                        "street": street["name"],
+                        "location": street["center"]
+                    })
+    except Exception as e:
+        print(f"❌ 解析数据出错：{e}")
+    return results
 
-    # 保存到文件
-    with open("districts.txt", "w", encoding="utf-8") as f:
-        for district in districts:
-            f.write(f"{district['name']}, {district['adcode']}, {district['center']}, {district['city']}\n")
+def save_to_excel(data, filename="城市行政区划.xlsx"):
+    if not data:
+        print("⚠️ 未获取到任何街道数据，Excel 文件未生成。")
+        return
+    df = pd.DataFrame(data)
+    df.columns = ["城市", "区/县", "街道", "坐标"]
+    df.to_excel(filename, index=False, engine="openpyxl")
+    print(f"✅ 已保存到 {filename}，共 {len(df)} 条记录。")
 
 if __name__ == "__main__":
-    province_name = input("请输入省份名称（如山东省）：")
-    response_data = get_districts(province_name)
-    if response_data:
-        extract_and_save_cities(response_data)
-        extract_and_save_districts(response_data)
-        print("城市和区县信息已分别保存到 cities.txt 和 districts.txt 文件中。")
+    city_name = input("请输入城市名称（如“广州”）：").strip()
+    print(f"🔍 正在查询 {city_name} 的行政区划信息...")
+    data = get_district_data(city_name)
+    if data:
+        parsed = parse_city_structure(data, city_name)
+        save_to_excel(parsed)
+    else:
+        print("❌ 请求失败，请检查网络或API Key。")
